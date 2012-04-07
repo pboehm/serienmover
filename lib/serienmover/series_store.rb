@@ -134,5 +134,9 @@ module Serienmover
       @series = seriesname
       @targetdir = targetdir
     end
+
+    def to_s
+      @series
+    end
   end
 end

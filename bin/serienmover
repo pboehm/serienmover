@@ -1,0 +1,82 @@
+#!/usr/bin/env ruby
+# -*- ruby -*-
+# encoding: UTF-8
+
+$LOAD_PATH << File.join(File.dirname(__FILE__), '..', 'lib')
+
+require 'serienmover'
+require 'serienrenamer'
+require 'fileutils'
+require 'hashconfig'
+require 'optparse'
+
+# create program configuration dirs/files
+CONFIG_DIR  = File.join( File.expand_path("~"), ".serienmover" )
+CONFIG_FILE = File.join( CONFIG_DIR, "config.yml" )
+FileUtils.mkdir(CONFIG_DIR) unless File.directory?(CONFIG_DIR)
+
+###
+# configuration
+STANDARD_CONFIG = {
+    :default_directory  => File.join(File.expand_path("~"), "Downloads"),
+    :series_directories => [],
+}
+
+config = STANDARD_CONFIG.merge_with_serialized(CONFIG_FILE)
+
+###
+# option definition and handling
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [DIR]"
+
+  opts.separator("")
+  opts.separator("Tool that moves series episodes into a specific")
+  opts.separator("directory structure.")
+  opts.separator("")
+  opts.separator("  Options:")
+
+  opts.on( "-s", "--seriesdir=DIR", String,
+           "Directory that contains series data") do |dirs|
+    dirs = [ dirs ] if dirs.is_a? String
+
+    dirs.each do |d|
+      if File.directory?(d)
+        config[:series_directories] << d
+      end
+    end
+  end
+
+  opts.separator("")
+  opts.separator("  Arguments:")
+  opts.separator("     DIR      The path that includes the episodes")
+  opts.separator("              defaults to ~/Downloads")
+  opts.separator("")
+
+end.parse!
+
+###
+# change into DIR
+episode_directory = ARGV.pop || config[:default_directory]
+
+fail "'#{episode_directory}' does not exist or is not a directory" unless
+    Dir.exists?(episode_directory)
+
+Dir.chdir(episode_directory)
+
+###
+# instantiate the series_store
+store = Serienmover::SeriesStore.new(config[:series_directories])
+
+###
+# iterate through all episode files
+Dir.new('.').each do |file|
+
+  next if file.match(/^\./)
+  next unless File.file? file
+  next unless Serienrenamer::Episode.determine_video_file(file)
+
+  episode = Serienrenamer::Episode.new(file)
+
+  p store.find_suitable_target(episode)
+end
