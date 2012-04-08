@@ -76,6 +76,8 @@ Dir.new('.').each do |file|
   next unless File.file? file
   next unless Serienrenamer::Episode.determine_video_file(file)
 
+  p file
+
   episode = Serienrenamer::Episode.new(file)
 
   p store.find_suitable_target(episode)

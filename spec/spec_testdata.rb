@@ -24,6 +24,14 @@ class TestData
                 :series => "Dr House",
                 :data => { :from => '1_1', :to => '4_20' }
     },
+    :spook => { :filename => "S10E01 - First Episode.avi",
+                :series => "Spooks",
+                :data => { :from => '1_1', :to => '9_20' }
+    },
+    :numbe => { :filename => "S04E31 - High Episode.avi",
+                :series => "Numb3rs",
+                :data => { :from => '1_1', :to => '4_30' }
+    },
   }
 
   # create test data
