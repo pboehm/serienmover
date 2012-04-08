@@ -9,6 +9,9 @@ require 'serienrenamer'
 require 'fileutils'
 require 'hashconfig'
 require 'optparse'
+require 'highline/import'
+require "highline/system_extensions"
+include HighLine::SystemExtensions
 
 # create program configuration dirs/files
 CONFIG_DIR  = File.join( File.expand_path("~"), ".serienmover" )
@@ -20,6 +23,9 @@ FileUtils.mkdir(CONFIG_DIR) unless File.directory?(CONFIG_DIR)
 STANDARD_CONFIG = {
     :default_directory  => File.join(File.expand_path("~"), "Downloads"),
     :series_directories => [],
+    :read_episode_info  => false,
+    :store_path         => '',
+    :byte_count_for_md5 => 2048,
 }
 
 config = STANDARD_CONFIG.merge_with_serialized(CONFIG_FILE)
@@ -37,7 +43,7 @@ OptionParser.new do |opts|
   opts.separator("  Options:")
 
   opts.on( "-s", "--seriesdir=DIR", String,
-           "Directory that contains series data") do |dirs|
+           "Directory that contains series data (multiple allowed)") do |dirs|
     dirs = [ dirs ] if dirs.is_a? String
 
     dirs.each do |d|
@@ -45,6 +51,11 @@ OptionParser.new do |opts|
         config[:series_directories] << d
       end
     end
+  end
+
+  opts.on( "--ignore-seriesinfo",
+           "do not use the information from the infostore") do |opt|
+    config[:read_episode_info] = false
   end
 
   opts.separator("")
@@ -69,8 +80,15 @@ Dir.chdir(episode_directory)
 store = Serienmover::SeriesStore.new(config[:series_directories])
 
 ###
+# instantiate information store
+info_store = Serienrenamer::InformationStore.new(
+    config[:store_path], config[:byte_count_for_md5])
+
+###
 # iterate through all episode files
-Dir.new('.').each do |file|
+episode_actions = []
+
+Dir.new('.').to_a.sort.each do |file|
 
   next if file.match(/^\./)
   next unless File.file? file
@@ -80,5 +98,93 @@ Dir.new('.').each do |file|
 
   episode = Serienrenamer::Episode.new(file)
 
-  p store.find_suitable_target(episode)
+  # get seriesname from the informationstore which is used by
+  # serienrenamer to store the seriesname when it renames files
+  md5 = episode.md5sum(config[:byte_count_for_md5])
+  series = info_store.episode_hash[md5]
+
+  options = {}
+  if config[:read_episode_info] && series && series.match(/\w+/)
+    options[:series] = series
+  end
+
+  targets = store.find_suitable_target(episode, options)
+  selected_target = nil
+
+  ###
+  # process the targets
+  case targets.size
+  when 0
+    puts "No suitable target found\n"
+    next
+  when 1
+    selected_target = targets[0]
+  else
+
+    begin
+      puts "Available targets:"
+      choose do |menu|
+        menu.prompt = "Choose the right target: "
+
+        targets.each do |t|
+          menu.choice t.series do lambda { selected_target = t }.call end
+        end
+      end
+    rescue Interrupt
+      puts ""
+    end
+
+  end
+
+  if selected_target
+    puts ">> '%s'" % selected_target
+    episode.target = selected_target
+
+    ###
+    # ask for the action (copy/move)
+    print "What should be done ( [c]opy (*) , [m]ove ): "
+    char = get_character
+    print char.chr unless char.chr.match(/\r/)
+
+    unless char.chr.match(/[kcmv\r]/i)
+      puts "\nwill be skipped ...\n\n"
+      next
+    end
+
+    if char.chr.match(/[kc\r]/i)
+      episode.set_action(copy: true)
+      print " ... copy"
+    else
+      episode.set_action(move: true)
+      print " ... move"
+    end
+
+    ###
+    # save the episode and set the target as used
+    store.set_target_to_used(episode, selected_target)
+
+    episode_actions << episode
+  end
+
+  puts "\n\n"
+end
+
+exit if episode_actions.empty?
+
+####
+# Process the actions on the episodes
+print "Start processing the episodes ? [yJ]"
+char = get_character
+print char.chr
+
+unless char.chr.match(/[jy\r]/i)
+  puts "\nwill exit ...\n\n"
+  exit
+end
+
+puts "\nEpisodes will be processed now"
+episode_actions.each do |episode|
+  puts "%s '%s' to '%s'" % [episode.action.capitalize, episode, episode.target]
+
+  episode.process_action
 end
