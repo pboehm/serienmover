@@ -54,9 +54,15 @@ OptionParser.new do |opts|
     end
   end
 
-  opts.on( "--ignore-seriesinfo",
+  opts.on( "-i", "--ignore-seriesinfo",
            "do not use the information from the infostore") do |opt|
     config[:read_episode_info] = false
+  end
+
+  opts.on( "-v", "--version",
+           "Outputs the version number.") do |opt|
+    puts Serienmover::VERSION
+    exit
   end
 
   opts.separator("")
