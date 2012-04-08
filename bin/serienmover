@@ -21,11 +21,12 @@ FileUtils.mkdir(CONFIG_DIR) unless File.directory?(CONFIG_DIR)
 ###
 # configuration
 STANDARD_CONFIG = {
-    :default_directory  => File.join(File.expand_path("~"), "Downloads"),
-    :series_directories => [],
-    :read_episode_info  => false,
-    :store_path         => '',
-    :byte_count_for_md5 => 2048,
+  :default_directory    => File.join(File.expand_path("~"), "Downloads"),
+  :series_directories   => [],
+  :read_episode_info    => false,
+  :store_path           => '',
+  :byte_count_for_md5   => 2048,
+  :collective_directory => '',
 }
 
 config = STANDARD_CONFIG.merge_with_serialized(CONFIG_FILE)
@@ -187,4 +188,14 @@ episode_actions.each do |episode|
   puts "%s '%s' to '%s'" % [episode.action.capitalize, episode, episode.target]
 
   episode.process_action
+
+  # move copied file into a collective_directory if needed
+  if config[:collective_directory] &&
+    File.directory?(config[:collective_directory]) &&
+      episode.action.match(/copy/i)
+
+    remote_file = File.join(config[:collective_directory],
+                            File.basename(episode.episodepath))
+    FileUtils.mv(episode.episodepath, remote_file)
+  end
 end
