@@ -21,12 +21,14 @@ FileUtils.mkdir(CONFIG_DIR) unless File.directory?(CONFIG_DIR)
 ###
 # configuration
 STANDARD_CONFIG = {
-  :default_directory    => File.join(File.expand_path("~"), "Downloads"),
-  :series_directories   => [],
-  :read_episode_info    => false,
-  :store_path           => '',
-  :byte_count_for_md5   => 2048,
-  :collective_directory => '',
+  :default_directory      => File.join(File.expand_path("~"), "Downloads"),
+  :series_directories     => [],
+  :read_episode_info      => false,
+  :store_path             => '',
+  :byte_count_for_md5     => 2048,
+  :collective_directory   => '',
+  :auto_process_list      => false,
+  :auto_process_list_file => File.join(CONFIG_DIR, "autoprocess.yml")
 }
 
 config = STANDARD_CONFIG.merge_with_serialized(CONFIG_FILE)
@@ -59,6 +61,11 @@ OptionParser.new do |opts|
     config[:read_episode_info] = false
   end
 
+  opts.on( "-n", "--[no]-autoprocess",
+           "use a file to select between copying and moving") do |opt|
+    config[:auto_process_list] = opt
+  end
+
   opts.on( "-v", "--version",
            "Outputs the version number.") do |opt|
     puts Serienmover::VERSION
@@ -85,6 +92,16 @@ Dir.chdir(episode_directory)
 ###
 # instantiate the series_store
 store = Serienmover::SeriesStore.new(config[:series_directories])
+
+###
+# build up and load autoprocess list
+autoprocess_list = {}
+
+if config[:auto_process_list] && config[:auto_process_list] == true
+  exisiting_series = Hash[store.series_list.map{ |s| [s, "n"] }]
+  autoprocess_list =
+    exisiting_series.merge_with_serialized(config[:auto_process_list_file])
+end
 
 ###
 # instantiate information store
@@ -147,18 +164,28 @@ Dir.new('.').to_a.sort.each do |file|
     puts ">> '%s'" % selected_target
     episode.target = selected_target
 
+    # get the choice from the autoprocess
+    choice = autoprocess_list[episode.target.series]
+    copy = nil
+    copy = true if choice && choice.match(/[ck]/i)
+    copy = false if choice && choice.match(/[vm]/i)
+
     ###
     # ask for the action (copy/move)
     print "What should be done ( [c]opy (*) , [m]ove ): "
-    char = get_character
-    print char.chr unless char.chr.match(/\r/)
+    char = nil
 
-    unless char.chr.match(/[kcmv\r]/i)
-      puts "\nwill be skipped ...\n\n"
-      next
+    if copy.nil?
+      char = get_character
+      print char.chr unless char.chr.match(/\r/)
+
+      unless char.chr.match(/[kcmv\r]/i)
+        puts "\nwill be skipped ...\n\n"
+        next
+      end
     end
 
-    if char.chr.match(/[kc\r]/i)
+    if copy == true || char && char.chr.match(/[kc\r]/i)
       episode.set_action(copy: true)
       print " ... copy"
     else

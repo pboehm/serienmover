@@ -107,4 +107,11 @@ describe Serienmover::SeriesStore do
     less_results = @store.find_suitable_target(episode)
     less_results.size.should be 1
   end
+
+  it "should return a list with all seriesnames" do
+    series = @store.series_list()
+
+    series.is_a?(Array).should be_true
+    series.include?("Criminal Minds").should be_true
+  end
 end

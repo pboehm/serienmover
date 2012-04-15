@@ -19,6 +19,7 @@ process the files.
 *   creates a new season directory if episode is the first of a new season
     by detecting the pattern from former seasons
 *   has some metrics to find mostly the right target
+*   can process the series automatic by file
 
 ## Usage
 

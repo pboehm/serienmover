@@ -147,6 +147,13 @@ module Serienmover
           File.join(target.targetdir, episode.to_s)
     end
 
+    # Public: list of all series in the store
+    #
+    # Returns an array of all exisiting series
+    def series_list
+      @series_data.keys
+    end
+
     class << self
 
       # Public: tries to match the suppplied seriesname pattern
