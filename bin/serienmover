@@ -26,7 +26,7 @@ STANDARD_CONFIG = {
   :read_episode_info      => false,
   :store_path             => '',
   :byte_count_for_md5     => 2048,
-  :collective_directory   => '',
+  :post_copy_hook         => '',
   :auto_process_list      => false,
   :auto_process_list_file => File.join(CONFIG_DIR, "autoprocess.yml")
 }
@@ -222,13 +222,22 @@ episode_actions.each do |episode|
 
   episode.process_action
 
-  # move copied file into a collective_directory if needed
-  if config[:collective_directory] &&
-    File.directory?(config[:collective_directory]) &&
-      episode.action.match(/copy/i)
+  ###
+  # run the Script that is supplied in config[:post_copy_hook]
+  # this lets you process episodes that are copied
+  #
+  # the supplied Script is called with two parameters
+  #     1. the path to the episodefile
+  #     2. the seriesname
+  if config[:post_copy_hook] &&
+    File.file?(config[:post_copy_hook]) &&
+        File.executable?(config[:post_copy_hook]) &&
+            episode.action.match(/copy/i)
 
-    remote_file = File.join(config[:collective_directory],
-                            File.basename(episode.episodepath))
-    FileUtils.mv(episode.episodepath, remote_file)
+    puts "Calling Post-Copy-Hook for this episode"
+    cmd = '%s "%s" "%s"' %
+        [ config[:post_copy_hook], episode.episodepath, episode.target ]
+
+    system(cmd) or fail "Post-Copy-Hook ends not succesfully"
   end
 end
