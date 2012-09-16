@@ -56,14 +56,15 @@ like, hold all copied files in a separate directory. This file has to be
 executable and there are two parameters supplied:
     1) the episodefile 2) the seriesname
 
-### auto_process_list
-Should use `serienmover` a file to decide if a file is moved or copied.
-The path to the file is set by `auto_process_list_file`, which defaults to
-`~/.serienmover/autoprocess.yml`. This file is updated by `serienmover` with
-new series. You can select `c` (copy), `m` (move) or `n` (nothing) for every
-series. An example for this file follows:
+### auto_process_enable
+Should `serienmover` decide automatically which action (copy/move) should be
+applied on the episodes.
 
-    Scrubs: c
-    Goofy und Max: n
-    New Girl: m
+### auto_default_action
+This is the default action, that `serienmover` will apply, when the previous
+setting is true.
 
+### auto_exceptions
+A list of series that will have the opposite default action. When
+`auto_default_action` is `:copy` than the default action is `:move`, and vice
+versa.

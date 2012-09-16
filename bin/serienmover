@@ -27,14 +27,15 @@ STANDARD_CONFIG = {
   :store_path             => '',
   :byte_count_for_md5     => 2048,
   :post_copy_hook         => '',
-  :auto_process_list      => false,
-  :auto_process_list_file => File.join(CONFIG_DIR, "autoprocess.yml")
+  :auto_process_enable    => false,
+  :auto_default_action    => :copy,  # or :move
+  :auto_exceptions        => [       # Series that should have the other action
+    'SERIES_DOESN_NOT_EXISTS',
+],
 }
 
 config = STANDARD_CONFIG.merge_with_serialized(CONFIG_FILE)
 
-###
-# option definition and handling
 options = {}
 OptionParser.new do |opts|
   opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [DIR]"
@@ -46,7 +47,7 @@ OptionParser.new do |opts|
   opts.separator("  Options:")
 
   opts.on( "-s", "--seriesdir=DIR", String,
-           "Directory that contains series data (multiple allowed)") do |dirs|
+          "Directory that contains series data (multiple allowed)") do |dirs|
     dirs = [ dirs ] if dirs.is_a? String
 
     dirs.each do |d|
@@ -54,98 +55,106 @@ OptionParser.new do |opts|
         config[:series_directories] << d
       end
     end
-  end
+          end
 
   opts.on( "-i", "--ignore-seriesinfo",
-           "do not use the information from the infostore") do |opt|
+          "do not use the information from the infostore") do |opt|
     config[:read_episode_info] = false
-  end
+          end
 
-  opts.on( "-n", "--[no]-autoprocess",
-           "use a file to select between copying and moving") do |opt|
-    config[:auto_process_list] = opt
-  end
+  opts.on( "-n", "--no-autoprocess",
+          "disables auto processing") do |opt|
+    config[:auto_process_enable] = false
+          end
 
   opts.on( "-v", "--version",
-           "Outputs the version number.") do |opt|
+          "Outputs the version number.") do |opt|
     puts Serienmover::VERSION
     exit
-  end
+          end
 
   opts.separator("")
   opts.separator("  Arguments:")
   opts.separator("     DIR      The path that includes the episodes")
   opts.separator("              defaults to ~/Downloads")
   opts.separator("")
-
 end.parse!
 
-###
-# change into DIR
-episode_directory = ARGV.pop || config[:default_directory]
 
-fail "'#{episode_directory}' does not exist or is not a directory" unless
-    Dir.exists?(episode_directory)
+class Serienmover::Cmdline
 
-Dir.chdir(episode_directory)
+  def initialize(config, options)
+    @config = config
+    @options = options
 
-###
-# instantiate the series_store
-store = Serienmover::SeriesStore.new(config[:series_directories])
+    @series_store = Serienmover::SeriesStore.new(@config[:series_directories])
+    @info_store = Serienrenamer::InformationStore.new(
+    @config[:store_path], @config[:byte_count_for_md5])
 
-###
-# build up and load autoprocess list
-autoprocess_list = {}
-
-if config[:auto_process_list] && config[:auto_process_list] == true
-  exisiting_series = Hash[store.series_list.map{ |s| [s, "n"] }]
-  autoprocess_list =
-    exisiting_series.merge_with_serialized(config[:auto_process_list_file])
-end
-
-###
-# instantiate information store
-info_store = Serienrenamer::InformationStore.new(
-    config[:store_path], config[:byte_count_for_md5])
-
-###
-# iterate through all episode files
-episode_actions = []
-
-Dir.new('.').to_a.sort.each do |file|
-
-  next if file.match(/^\./)
-  next unless File.file? file
-  next unless Serienrenamer::Episode.determine_video_file(file)
-
-  p file
-
-  episode = Serienrenamer::Episode.new(file)
-
-  # get seriesname from the informationstore which is used by
-  # serienrenamer to store the seriesname when it renames files
-  md5 = episode.md5sum(config[:byte_count_for_md5])
-  series = info_store.episode_hash[md5]
-
-  options = {}
-  if config[:read_episode_info] && series && series.match(/\w+/)
-    options[:series] = series
+    @processable_files = []
   end
 
-  targets = store.find_suitable_target(episode, options)
-  selected_target = nil
+  def process
+    chdir
 
-  ###
-  # process the targets
-  case targets.size
-  when 0
-    puts "No suitable target found\n"
-    next
-  when 1
-    selected_target = targets[0]
-  else
+    Dir.new('.').to_a.sort.each do |file|
+      determine_target_and_action file
+    end
 
-    begin
+    exit if @processable_files.empty?
+
+    exit unless should_start_with_processing?
+
+    puts "\nEpisodes will be processed now"
+
+    @processable_files.each do |episode|
+      apply_action_on_episode episode
+    end
+  end
+
+
+  def chdir
+    episode_directory = ARGV.pop || @config[:default_directory]
+
+    fail "'#{episode_directory}' does not exist or is not a directory" unless
+        Dir.exists?(episode_directory)
+    Dir.chdir(episode_directory)
+  end
+
+
+  def determine_target_and_action(file)
+    return if file.match(/^\./)
+    return unless File.file? file
+    return unless Serienrenamer::Episode.determine_video_file(file)
+
+    puts "\n\n"
+    p file
+
+    episode = Serienrenamer::Episode.new(file)
+
+    # get seriesname from the informationstore which is used by
+    # serienrenamer to store the seriesname when it renames files
+    md5 = episode.md5sum(@config[:byte_count_for_md5])
+    series = @info_store.episode_hash[md5]
+
+    options = {}
+    if @config[:read_episode_info] && series && series.match(/\w+/)
+      options[:series] = series
+    end
+
+    targets = @series_store.find_suitable_target(episode, options)
+    selected_target = nil
+
+    ###
+    # process the targets
+    case targets.size
+    when 0
+      puts "No suitable target found\n"
+      return
+    when 1
+      selected_target = targets[0]
+    else
+
       puts "Available targets:"
       choose do |menu|
         menu.prompt = "Choose the right target: "
@@ -154,90 +163,98 @@ Dir.new('.').to_a.sort.each do |file|
           menu.choice t.series do lambda { selected_target = t }.call end
         end
       end
-    rescue Interrupt
-      puts ""
     end
 
-  end
+    if selected_target
+      puts ">> '%s'" % selected_target
+      episode.target = selected_target
 
-  if selected_target
-    puts ">> '%s'" % selected_target
-    episode.target = selected_target
+      # get the choice from the autoprocess
+      copy = nil
+      if @config[:auto_process_enable]
 
-    # get the choice from the autoprocess
-    choice = autoprocess_list[episode.target.series]
-    copy = nil
-    copy = true if choice && choice.match(/[ck]/i)
-    copy = false if choice && choice.match(/[vm]/i)
-
-    ###
-    # ask for the action (copy/move)
-    print "What should be done ( [c]opy (*) , [m]ove ): "
-    char = nil
-
-    if copy.nil?
-      char = get_character
-      print char.chr unless char.chr.match(/\r/)
-
-      unless char.chr.match(/[kcmv\r]/i)
-        puts "\nwill be skipped ...\n\n"
-        next
+        if @config[:auto_default_action] == :copy and not
+          @config[:auto_exceptions].include? episode.target.series
+          copy = true
+        else
+          copy = false
+        end
       end
+
+      ###
+      # ask for the action (copy/move)
+      print "What should be done ( [c]opy (*) , [m]ove ): "
+      char = nil
+
+      if copy.nil?
+        char = get_character
+        print char.chr unless char.chr.match(/\r/)
+
+        unless char.chr.match(/[kcmv\r]/i)
+          puts "\nwill be skipped ...\n\n"
+          return
+        end
+      end
+
+      if copy == true || char && char.chr.match(/[kc\r]/i)
+        episode.set_action(copy: true)
+        print " ... copy"
+      else
+        episode.set_action(move: true)
+        print " ... move"
+      end
+
+      ###
+      # save the episode and set the target as used
+      @series_store.set_target_to_used(episode, selected_target)
+
+      @processable_files << episode
     end
-
-    if copy == true || char && char.chr.match(/[kc\r]/i)
-      episode.set_action(copy: true)
-      print " ... copy"
-    else
-      episode.set_action(move: true)
-      print " ... move"
-    end
-
-    ###
-    # save the episode and set the target as used
-    store.set_target_to_used(episode, selected_target)
-
-    episode_actions << episode
   end
 
-  puts "\n\n"
-end
 
-exit if episode_actions.empty?
+  def apply_action_on_episode(episode)
+    puts "%s '%s' to '%s'" % [episode.action.capitalize, episode, episode.target]
 
-####
-# Process the actions on the episodes
-print "Start processing the episodes ? [yJ]"
-char = get_character
-print char.chr
+    episode.process_action
 
-unless char.chr.match(/[jy\r]/i)
-  puts "\nwill exit ...\n\n"
-  exit
-end
+    # the supplied Script is called with two parameters
+    #     1. the path to the episodefile
+    #     2. the seriesname
+    #
+    if @config[:post_copy_hook] &&
+      File.file?(@config[:post_copy_hook]) &&
+      File.executable?(@config[:post_copy_hook]) &&
+      episode.action.match(/copy/i)
 
-puts "\nEpisodes will be processed now"
-episode_actions.each do |episode|
-  puts "%s '%s' to '%s'" % [episode.action.capitalize, episode, episode.target]
+      puts "Calling Post-Copy-Hook for this episode"
+      cmd = '%s "%s" "%s"' %
+      [ @config[:post_copy_hook], episode.episodepath, episode.target ]
 
-  episode.process_action
+      system(cmd) or fail "Post-Copy-Hook ends not succesfully"
+    end
+  end
 
-  ###
-  # run the Script that is supplied in config[:post_copy_hook]
-  # this lets you process episodes that are copied
-  #
-  # the supplied Script is called with two parameters
-  #     1. the path to the episodefile
-  #     2. the seriesname
-  if config[:post_copy_hook] &&
-    File.file?(config[:post_copy_hook]) &&
-        File.executable?(config[:post_copy_hook]) &&
-            episode.action.match(/copy/i)
 
-    puts "Calling Post-Copy-Hook for this episode"
-    cmd = '%s "%s" "%s"' %
-        [ config[:post_copy_hook], episode.episodepath, episode.target ]
+  def should_start_with_processing?
 
-    system(cmd) or fail "Post-Copy-Hook ends not succesfully"
+    print "\n\nStart processing the episodes ? [yJ]"
+    char = get_character
+    print char.chr
+
+    unless char.chr.match(/[jy\r]/i)
+      puts "\nwill exit ...\n\n"
+      return false
+    end
+
+    true
   end
 end
+
+cmd = Serienmover::Cmdline.new(config, options)
+begin
+  cmd.process
+rescue Interrupt => e
+  puts
+end
+
