@@ -1,4 +1,4 @@
-# Serienmover
+# Serienmover [![Build Status](https://secure.travis-ci.org/pboehm/serienmover.png)](http://travis-ci.org/pboehm/serienmover)
 
 Tool that moves series episodes into a specific directory structure.
 It's recommended to use [serienrenamer](http://github.com/pboehm/serienrenamer)
